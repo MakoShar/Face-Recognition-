@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Face Detection </title>
+    <style>
+        body { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #222; color: #fff; }
+        video, canvas { border: 2px solid #fff; border-radius: 8px; font: 16px Arial !important;}
+        #video { width: 640px; height: 480px; }
+        #canvas { position: absolute; left: 0; top: 0; }
+    </style>
+</head>
+<body>
+    <div style="display: flex; flex-direction: row; width: 100vw; height: 100vh;">
+        <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;">
+            <h1>Face Detection </h1>
+            <button id="start-btn" style="margin: 20px; font-size: 1.2em;">Enable Webcam</button>
+            <div style="position: relative; width: 640px; height: 480px;">
+                <video id="video" autoplay muted style="display:none;"></video>
+                <canvas id="overlay" width="640" height="480" style="position: absolute; left: 0; top: 0; display:none;"></canvas>
+            </div>
+        </div>
+        <div id="record-section" style="flex: 0 0 350px; background: #181818; color: #fff; padding: 24px; overflow-y: auto; border-left: 2px solid #333;">
+            <h2>Recognition Record</h2>
+            <button id="download-json" style="margin-bottom: 20px;">Download JSON</button>
+            <ul id="record-list" style="list-style: none; padding: 0;"></ul>
+        </div>
+    </div>
+    <script src="face-api.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('overlay');
+        const startBtn = document.getElementById('start-btn');
+        const displaySize = { width: 640, height: 480 };
+        // Face Images here
+        const labeledFaceDescriptors = [];
+        const recordList = document.getElementById('record-list');
+        const downloadBtn = document.getElementById('download-json');
+        let recognitionRecord = [];
+
+        async function startWebcam() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: {} });
+                video.srcObject = stream;
+                video.style.display = '';
+                canvas.style.display = '';
+                startBtn.style.display = 'none';
+            } catch (err) {
+                alert('Error accessing webcam: ' + err.message + '\nPlease allow webcam access to use face detection.');
+            }
+        }
+
+        async function loadModels() {
+            console.log('🚀 Loading AI models...');
+            
+            try {
+                console.log('📦 Loading SSD MobileNet v1...');
+       		    await faceapi.nets.ssdMobilenetv1.loadFromUri('./models/ssd_mobilenetv1');
+       		    console.log('✅ SSD MobileNet v1 loaded');
+       		    
+       		    console.log('📦 Loading Face Recognition Net...');
+       		    await faceapi.nets.faceRecognitionNet.loadFromUri('./models/face_recognition');
+       		    console.log('✅ Face Recognition Net loaded');
+       		    
+       		    console.log('📦 Loading Face Landmark 68 Net...');
+      		    await faceapi.nets.faceLandmark68Net.loadFromUri('./models/face_landmark_68');
+      		    console.log('✅ Face Landmark 68 Net loaded');
+      		    
+                console.log('🎯 All models loaded successfully!');
+   		    } catch (err) {
+     		    console.error('❌ Model loading failed:', err);
+     		    alert("Model loading failed: " + err.message + "\n\nPlease check that all model files are present in the models folder.");
+  			}
+        }
+
+        async function getFaceImageFiles() {
+            // Try to fetch the list of images from the Faces folder
+            // This requires the server to allow directory listing or provide an API endpoint
+            try {
+                const response = await fetch('./Faces/');
+                const text = await response.text();
+                // Parse HTML directory listing for image files (works with some dev servers)
+                const matches = [...text.matchAll(/href="([^"]+\.(jpg|jpeg|png|gif))"/gi)];
+                return matches.map(m => m[1]).filter(f => !f.startsWith('.'));
+            } catch (e) {
+                // Fallback: use hardcoded list if fetch fails
+                console.log('Directory listing failed, using hardcoded face list');
+                return ["Aaditya_Verma.png", "Anoop_Verma.jpg"];
+            }
+        }
+
+        async function loadLabeledImages() {
+            const files = await getFaceImageFiles();
+            labeledFaceDescriptors.length = 0;
+            for (const file of files) {
+                const label = file.replace(/\.[^/.]+$/, "");
+                const imgPath = `./Faces/${file}`;
+                console.log('Loading face image:', imgPath);
+                const img = await faceapi.fetchImage(imgPath);
+                //const detections = await faceapi.detectSingleFace(img).withFaceLandmarks().withFaceDescriptor();
+                const detections = await faceapi.detectSingleFace(img, new faceapi.SsdMobilenetv1Options()).withFaceLandmarks().withFaceDescriptor();
+                console.log('ImageFile:', detections?.descriptor);
+                 //const detections = await faceapi.detectSingleFace(img, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor();
+               // const detections = await faceapi.detectSingleFace(img, new faceapi.SsdMobilenetv1Options()).withFaceLandmarks().withFaceDescriptor();
+                
+                if (!detections) {
+            		console.warn('No face found in image:', file);
+            		continue;
+        	}
+
+                labeledFaceDescriptors.push(new faceapi.LabeledFaceDescriptors(label, [detections.descriptor]));
+               console.log('Face Label Loaded descriptor for:', label);
+
+            }
+        }
+
+        function addRecord(name) {
+            const now = new Date();
+            const time = now.toLocaleTimeString();
+            recognitionRecord.push({ name, time });
+            const li = document.createElement('li');
+            li.textContent = `${name} - ${time}`;
+            recordList.appendChild(li);
+            saveRecordToServer();
+        }
+
+        function saveRecordToServer() {
+            fetch('Record/Local.json', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(recognitionRecord, null, 2)
+            }).catch(err => {
+                // This will fail unless a backend is set up to handle it
+                console.warn('Could not save to Local.json. Backend required.', err);
+            });
+        }
+
+        downloadBtn.onclick = function() {
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(recognitionRecord, null, 2));
+            const dlAnchor = document.createElement('a');
+            dlAnchor.setAttribute("href", dataStr);
+            dlAnchor.setAttribute("download", "recognition_record.json");
+            dlAnchor.click();
+        };
+
+        let lastRecognized = {};
+
+       
+        async function onPlay() {
+ 
+           if (labeledFaceDescriptors.length === 0) {
+                       console.warn('No known faces loaded. Cannot perform recognition.');
+                       // return;
+                }
+          
+            if (video.paused || video.ended) return setTimeout(() => onPlay(), 100);
+           // const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptors();
+            const detections = await faceapi.detectAllFaces(video, new faceapi.SsdMobilenetv1Options()).withFaceLandmarks().withFaceDescriptors();
+            /*
+            if (detections && detections.length > 0) {
+  		  detections.forEach((detection, index) => {
+     		   if (detection.descriptor) {
+       			     console.log(`Face ${index}:`, detection.descriptor);
+      			  }
+    		});
+	}
+**/
+
+            const resizedDetections = faceapi.resizeResults(detections, displaySize);
+            canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+            if (labeledFaceDescriptors.length > 0) {
+                // const faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors, 0.8);
+                const faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors, 0.6);
+                console.log('faceMatcher Matching against', labeledFaceDescriptors.length, 'known faces');
+
+                resizedDetections.forEach(detection => {
+                    const bestMatch = faceMatcher.findBestMatch(detection.descriptor);
+                    const label = bestMatch.label;
+                    const box = detection.detection.box;
+                    const drawBox = new faceapi.draw.DrawBox(box, { 
+                                //label: bestMatch.toString(), 
+                               label: label === "unknown" ? "Not Recognized" : label,
+                               boxColor: label === "unknown" ? "red" : "green",
+                               lineWidth: 2
+                         });
+                    console.log('bestMatch',bestMatch.toString());  // will print: "PersonName (0.35)" or "unknown"
+
+                    drawBox.draw(canvas);
+                    // Record only if new or after 5 seconds
+                    const name = bestMatch.label;
+                    const now = Date.now();
+                    if (!lastRecognized[name] || now - lastRecognized[name] > 5000) {
+                        addRecord(name);
+                        lastRecognized[name] = now;
+                    }
+                });
+            } else {
+                faceapi.draw.drawDetections(canvas, resizedDetections);
+            }
+            requestAnimationFrame(onPlay);
+        }
+
+        async function init() {
+            await loadModels();
+            await loadLabeledImages();
+            startBtn.addEventListener('click', async () => {
+                await startWebcam();
+                video.addEventListener('playing', onPlay);
+            });
+        }
+
+        init();
+    </script>
+</body>
+</html> 
