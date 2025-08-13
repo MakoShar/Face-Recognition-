@@ -152,14 +152,40 @@ def main():
             print(f"Usage: python launcher.py [port]")
             sys.exit(1)
     
-    # Start the server
-    success = start_server(port)
-    
-    if success:
-        print("👋 Thanks for using Face Recognition App!")
+    # Check if enhanced server exists and use it
+    enhanced_server_path = Path("enhanced_server.py")
+    if enhanced_server_path.exists():
+        print("🚀 Found enhanced server with record saving support!")
+        print("🔄 Starting enhanced server...")
+        try:
+            # Import and use the enhanced server directly
+            import enhanced_server
+            success = enhanced_server.start_enhanced_server(port)
+            if success:
+                print("👋 Thanks for using Face Recognition App!")
+            else:
+                print("❌ Enhanced server failed, falling back to basic server")
+                success = start_server(port)
+                if not success:
+                    print("❌ Failed to start the application")
+                    sys.exit(1)
+        except ImportError as e:
+            print(f"⚠️ Could not import enhanced server: {e}")
+            print("📝 Falling back to basic server")
+            success = start_server(port)
+            if not success:
+                print("❌ Failed to start the application")
+                sys.exit(1)
     else:
-        print("❌ Failed to start the application")
-        sys.exit(1)
+        # Fallback to basic server
+        print("📝 Using basic server (no record saving)")
+        success = start_server(port)
+        
+        if success:
+            print("👋 Thanks for using Face Recognition App!")
+        else:
+            print("❌ Failed to start the application")
+            sys.exit(1)
 
 if __name__ == "__main__":
     main()
