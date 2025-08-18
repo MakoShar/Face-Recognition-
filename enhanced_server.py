@@ -15,6 +15,7 @@ import time
 import webbrowser
 import threading
 import glob
+import ssl
 
 def cleanup_old_backups(backup_pattern, max_files=2):
     """Keep only the most recent backup files, delete older ones"""
@@ -297,22 +298,27 @@ class FaceRecognitionHandler(http.server.SimpleHTTPRequestHandler):
 def open_browser(port):
     """Open the app in the default browser after a delay"""
     time.sleep(2)
-    url = f"http://localhost:{port}"
+    url = f"https://localhost:{port}"
     print(f"🌐 Opening {url} in your browser...")
     webbrowser.open(url)
 
 def start_enhanced_server(port=8000):
-    """Start the enhanced server with POST support"""
+    """Start the enhanced server with POST support over HTTPS"""
     try:
         # Change to the script directory
         script_dir = Path(__file__).parent
         os.chdir(script_dir)
-        
+
         # Create server
         with socketserver.TCPServer(("", port), FaceRecognitionHandler) as httpd:
+            # Wrap the socket with SSL
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.load_cert_chain(certfile="localhost.pem", keyfile="localhost.key", password=None)
+            httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
+
             print(f"\n🚀 Enhanced Face Recognition Server")
             print(f"📁 Serving from: {script_dir}")
-            print(f"🌐 Server running at: http://localhost:{port}")
+            print(f"🔒 HTTPS server running at: https://localhost:{port}")
             print(f"💾 Record saving: ENABLED")
             print(f"📝 Records will be saved to: Record/Local.json")
             print(f"🎯 Punch-in records will be saved to: Record/Punch_in.json")
@@ -327,19 +333,19 @@ def start_enhanced_server(port=8000):
             print(f"   - Automatic timestamped backups")
             print(f"   - CORS headers for local development")
             print(f"\n🔄 Press Ctrl+C to stop the server\n")
-            
+
             # Start browser in a separate thread
             browser_thread = threading.Thread(target=open_browser, args=(port,))
             browser_thread.daemon = True
             browser_thread.start()
-            
+
             # Start server
             try:
                 httpd.serve_forever()
             except KeyboardInterrupt:
                 print(f"\n\n🛑 Server stopped by user")
                 return True
-                
+
     except OSError as e:
         if "Address already in use" in str(e):
             print(f"❌ Port {port} is already in use")

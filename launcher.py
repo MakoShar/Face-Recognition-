@@ -15,6 +15,7 @@ import threading
 import time
 import sys
 import os
+import ssl
 from pathlib import Path
 
 # Configuration
@@ -77,28 +78,33 @@ def find_available_port(start_port=DEFAULT_PORT):
 def open_browser(port):
     """Open the app in the default browser after a delay"""
     time.sleep(SERVER_DELAY)
-    url = f"http://localhost:{port}"
+    url = f"https://localhost:{port}"
     print(f"🌐 Opening {url} in your browser...")
     webbrowser.open(url)
 
 def start_server(port):
-    """Start the HTTP server"""
+    """Start the HTTPS server"""
     try:
         # Change to the script directory
         script_dir = Path(__file__).parent
         os.chdir(script_dir)
-        
+
         # Check requirements
         if not check_requirements():
             print("\n❌ Please ensure all required files are present before running the app.")
             return False
-        
+
         # Create server
         handler = CustomHTTPRequestHandler
         with socketserver.TCPServer(("", port), handler) as httpd:
+            # Wrap the socket with SSL
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.load_cert_chain(certfile="localhost.pem", keyfile="localhost.key", password=None)
+            httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
+
             print(f"\n🚀 Face Recognition App Launcher")
             print(f"📁 Serving from: {script_dir}")
-            print(f"🌐 Server running at: http://localhost:{port}")
+            print(f"🔒 HTTPS server running at: https://localhost:{port}")
             print(f"📹 Access your face recognition app in the browser!")
             print(f"\n💡 Features available:")
             print(f"   - Real-time face detection and recognition")
@@ -106,19 +112,19 @@ def start_server(port):
             print(f"   - Download recognition records as JSON")
             print(f"\n⚠️  Make sure to allow webcam access when prompted!")
             print(f"\n🔄 Press Ctrl+C to stop the server\n")
-            
+
             # Start browser in a separate thread
             browser_thread = threading.Thread(target=open_browser, args=(port,))
             browser_thread.daemon = True
             browser_thread.start()
-            
+
             # Start server
             try:
                 httpd.serve_forever()
             except KeyboardInterrupt:
                 print(f"\n\n🛑 Server stopped by user")
                 return True
-                
+
     except OSError as e:
         if "Address already in use" in str(e):
             print(f"❌ Port {port} is already in use. Trying to find another port...")
